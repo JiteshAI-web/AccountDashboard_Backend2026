@@ -1,0 +1,62 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
+
+# Environments
+env/
+venv/
+ENV/
+.venv/
+
+# Environment variables
+.env
+accounts/.env
+
+# VS Code
+.vscode/
+
+# IDEs
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Tests / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Celery
+celerybeat-schedule
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Node
+node_modules/
+
+# Pipenv
+Pipfile.lock
+.env
+accounts/.env
+__pycache__/
+*.pyc
