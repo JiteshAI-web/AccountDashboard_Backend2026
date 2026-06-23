@@ -9,6 +9,8 @@ urlpatterns = [
     path('auth/logout/', views.logout, name='logout'),
      path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('banks/search/', search_banks),
+    path('bank-accounts/', views.list_bank_accounts, name='list_bank_accounts'),
+    path('banks/init-company-folder/', views.init_company_folder, name='init_company_folder'),
     path('banks/create-folder/', views.create_drive_folder, name='create_drive_folder'),
     path('banks/create-folder/async/', views.create_drive_folder_async, name='create_drive_folder_async'),
     path('banks/upload-file/', views.upload_to_drive, name='upload_to_drive'),

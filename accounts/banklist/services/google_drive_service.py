@@ -110,22 +110,87 @@ class GoogleDriveService:
             print(f"❌ Error checking folder existence: {error}")
             return None
 
-    def create_bank_folder_structure(self, bank_name, current_year=None):
+    # Default subfolders created inside every company folder
+    COMPANY_SUBFOLDERS = [
+        'Reconciliation_Receipt',
+        'Ledger',
+        'Bank_Statement',
+        'Billing_Receipt',
+    ]
+
+    def get_or_create_company_folder(self, company_name):
         """
-        Create folder structure for a bank.
+        Get or create a company-level folder under the parent Drive folder,
+        along with 4 default subfolders.
 
-        Current structure (fast — single subfolder):
-        Bank Name/
-          └── Statement/
-
-        All uploaded files (PDF, Excel, images, etc.) go into this single
-        'Statement' subfolder, regardless of which month they belong to.
+        Structure:
+            GOOGLE_DRIVE_PARENT_FOLDER_ID/
+              └── <company_name>/
+                  ├── Reconciliation_Receipt/
+                  ├── Ledger/
+                  ├── Bank_Statement/
+                  └── Billing_Receipt/
 
         Args:
-            bank_name: Name of the bank
-            current_year: Unused now, kept for backward compatibility with
-                          callers; will matter again if month-folder logic
-                          below is restored.
+            company_name: Name of the company
+
+        Returns:
+            dict with company folder ID and subfolder IDs, or None on failure
+        """
+        if not self.service:
+            return None
+
+        try:
+            parent_folder_id = settings.GOOGLE_DRIVE_PARENT_FOLDER_ID
+
+            # Check if company folder already exists
+            company_folder_id = self.folder_exists(company_name, parent_folder_id)
+
+            if not company_folder_id:
+                company_folder_id = self.create_folder(company_name, parent_folder_id)
+                print(f"🏢 Created company folder: {company_name}")
+            else:
+                print(f"🏢 Company folder already exists: {company_name}")
+
+            if not company_folder_id:
+                return None
+
+            # Create default subfolders inside the company folder
+            subfolders = {}
+            for subfolder_name in self.COMPANY_SUBFOLDERS:
+                subfolder_id = self.folder_exists(subfolder_name, company_folder_id)
+                if not subfolder_id:
+                    subfolder_id = self.create_folder(subfolder_name, company_folder_id)
+                    print(f"  📂 Created subfolder: {subfolder_name}")
+                else:
+                    print(f"  📂 Subfolder already exists: {subfolder_name}")
+                if subfolder_id:
+                    subfolders[subfolder_name] = subfolder_id
+
+            return {
+                'company_folder_id': company_folder_id,
+                'subfolders': subfolders,
+            }
+
+        except Exception as error:
+            print(f"❌ Error getting/creating company folder '{company_name}': {error}")
+            return None
+
+    def create_bank_folder_structure(self, bank_name, company_name=None, current_year=None):
+        """
+        Create folder structure for a bank under the company's Drive folder.
+
+        Structure:
+          Company Folder/
+            └── Bank Name - Account Holder - Account Number/
+                └── Statement/
+
+        Args:
+            bank_name: Formatted bank folder name
+                       (e.g. "SBI - John - 123456")
+            company_name: Name of the logged-in user's company.
+                          Falls back to parent folder if None.
+            current_year: Unused now, kept for backward compatibility.
 
         Returns:
             dict with folder IDs and status
@@ -140,10 +205,27 @@ class GoogleDriveService:
             }
 
         try:
-            # Get parent folder ID from settings
-            parent_folder_id = settings.GOOGLE_DRIVE_PARENT_FOLDER_ID
+            # Step 0: Resolve the parent folder — company's "Bank_Statement"
+            # subfolder if company_name is provided, otherwise the global
+            # parent folder (legacy behavior).
+            if company_name:
+                company_result = self.get_or_create_company_folder(company_name)
+                if not company_result:
+                    return {
+                        'success': False,
+                        'message': f'Failed to get/create company folder for "{company_name}"',
+                        'bank_folder_id': None,
+                        'statement_folder_id': None,
+                        'month_folders': []
+                    }
+                # Bank folders go inside "Bank_Statement" subfolder
+                parent_folder_id = company_result['subfolders'].get(
+                    'Bank_Statement', company_result['company_folder_id']
+                )
+            else:
+                parent_folder_id = settings.GOOGLE_DRIVE_PARENT_FOLDER_ID
 
-            # Step 1: Create/Get bank folder
+            # Step 1: Create/Get bank folder under the company folder
             bank_folder_id = self.folder_exists(bank_name, parent_folder_id)
 
             if not bank_folder_id:
@@ -161,7 +243,7 @@ class GoogleDriveService:
                     'month_folders': []
                 }
 
-            # Step 2: Create single "Statement" subfolder (fast path)
+            # Step 2: Create single "Statement" subfolder
             statement_folder_name = "Statement"
             statement_folder_id = self.folder_exists(statement_folder_name, bank_folder_id)
 

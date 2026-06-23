@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Bank
+from .models import Bank, BankAccount
 from django.contrib.auth import authenticate
 from .models import User, Company
 
@@ -8,6 +8,21 @@ class BankSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bank
         fields = '__all__'
+
+
+class BankAccountSerializer(serializers.ModelSerializer):
+    bank_name = serializers.CharField(source='bank.bank_name', read_only=True)
+    bank_short_name = serializers.CharField(source='bank.short_name', read_only=True)
+
+    class Meta:
+        model = BankAccount
+        fields = [
+            'id', 'bank', 'bank_name', 'bank_short_name',
+            'account_holder_name', 'account_number', 'ifsc_code',
+            'bank_folder_id', 'statement_folder_id', 'drive_link',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['bank_folder_id', 'statement_folder_id', 'drive_link']
 
 
 class RegisterSerializer(serializers.Serializer):

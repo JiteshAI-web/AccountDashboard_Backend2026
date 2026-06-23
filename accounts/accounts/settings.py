@@ -140,7 +140,7 @@ CELERY_TIMEZONE = "UTC"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "ENGINE": "django.db.backends.postgresql",
         "NAME": "accountbanklist",
         "USER": "Vertoxlabs1987Bfl",
         "PASSWORD": "Vtx@1987#2026#Bfl@",

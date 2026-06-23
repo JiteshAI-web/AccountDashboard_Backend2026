@@ -70,3 +70,25 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_table = 'users'
         app_label = 'banklist'
 
+
+class BankAccount(models.Model):
+    """Stores a bank account created by a user/company, linked to Google Drive folders."""
+    company       = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bank_accounts')
+    bank          = models.ForeignKey(Bank, on_delete=models.CASCADE)
+    account_holder_name = models.CharField(max_length=255)
+    account_number      = models.CharField(max_length=100)
+    ifsc_code           = models.CharField(max_length=20, blank=True, null=True)
+    bank_folder_id      = models.CharField(max_length=255, blank=True, null=True)
+    statement_folder_id = models.CharField(max_length=255, blank=True, null=True)
+    drive_link          = models.URLField(max_length=500, blank=True, null=True)
+    created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.bank.bank_name} - {self.account_holder_name} - {self.account_number}"
+
+    class Meta:
+        db_table = 'bank_accounts'
+        ordering = ['-created_at']
+        unique_together = ['company', 'account_number', 'bank']
+

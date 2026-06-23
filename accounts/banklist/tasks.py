@@ -4,8 +4,8 @@ from .services.google_drive_service import drive_service
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def create_drive_folder_task(self, folder_name):
-    return drive_service.create_bank_folder_structure(folder_name)
+def create_drive_folder_task(self, folder_name, company_name=None):
+    return drive_service.create_bank_folder_structure(folder_name, company_name=company_name)
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})

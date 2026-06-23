@@ -3,10 +3,12 @@ from django.shortcuts import render
 # Create your views here.
 from django.db.models import Q
 from django.views.decorators.cache import cache_page
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from .models import Bank
-from .serializers import BankSerializer
+from .models import BankAccount
+from .serializers import BankSerializer, BankAccountSerializer
 from rest_framework import status
 from .services.google_drive_service import drive_service
 from .tasks import create_drive_folder_task, upload_to_drive_task
@@ -14,7 +16,6 @@ import calendar
 from datetime import datetime
 import re
 from celery.result import AsyncResult
-from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -63,8 +64,24 @@ def detect_month_year_from_filename(filename):
 
     return None, None
 
+
+def _get_company_name(request):
+    """Return the logged-in user's company name for Drive folder isolation.
+    Falls back to user's full_name if no company is assigned."""
+    try:
+        user = request.user
+        if user.company:
+            return user.company.name
+        # Fallback: use full_name so user still gets isolated folder
+        return user.full_name or user.email
+    except Exception as e:
+        print(f"⚠️ _get_company_name error: {e}")
+        return None
+
+
 @cache_page(60)
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def search_banks(request):
     search_term = request.GET.get('search', '').strip()
     
@@ -83,36 +100,94 @@ def search_banks(request):
     return Response(data, status=status.HTTP_200_OK)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def init_company_folder(request):
+    """
+    Create (or get) the logged-in user's company folder in Google Drive,
+    along with 4 default subfolders.
+    """
+    company_name = _get_company_name(request)
 
+    if not company_name:
+        return Response(
+            {'error': 'Could not determine company/user name'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    result = drive_service.get_or_create_company_folder(company_name)
+
+    if not result:
+        return Response(
+            {'error': 'Failed to create company folder in Google Drive'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    return Response({
+        'success': True,
+        'message': f'Company folder ready: {company_name}',
+        'company_name': company_name,
+        'company_folder_id': result['company_folder_id'],
+        'subfolders': result['subfolders'],
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_bank_accounts(request):
+    """List all bank accounts for the logged-in user's company."""
+    company = request.user.company
+    if not company:
+        return Response({'error': 'User has no company'}, status=400)
+
+    accounts = BankAccount.objects.filter(company=company).select_related('bank')
+    serializer = BankAccountSerializer(accounts, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_drive_folder(request):
-    """Create Google Drive folder for selected bank with account details"""
+    """Create Google Drive folder for selected bank and save to DB."""
     bank_name = request.data.get('bank_name')
     account_holder = request.data.get('account_holder_name')
     account_number = request.data.get('account_number')
-    ifsc_code = request.data.get('ifsc_code')
+    ifsc_code = request.data.get('ifsc_code', '')
 
     if not bank_name:
         return Response({'error': 'bank_name is required'}, status=400)
 
-    if not Bank.objects.filter(bank_name=bank_name).exists():
+    bank = Bank.objects.filter(bank_name=bank_name).first()
+    if not bank:
         return Response({'error': f'Bank {bank_name} not found'}, status=404)
 
     folder_name = f"{bank_name} - {account_holder} - {account_number}"
+    company_name = _get_company_name(request)
 
-    drive_result = drive_service.create_bank_folder_structure(folder_name)
+    drive_result = drive_service.create_bank_folder_structure(folder_name, company_name=company_name)
 
     if not drive_result['success']:
         return Response({'error': drive_result['message']}, status=500)
 
+    # Save bank account record in DB
+    company = request.user.company
+    bank_account, created = BankAccount.objects.get_or_create(
+        company=company,
+        bank=bank,
+        account_number=account_number,
+        defaults={
+            'account_holder_name': account_holder,
+            'ifsc_code': ifsc_code,
+            'bank_folder_id': drive_result.get('bank_folder_id'),
+            'statement_folder_id': drive_result.get('statement_folder_id'),
+            'drive_link': drive_result.get('bank_folder_link'),
+        }
+    )
+
     return Response({
         'success': True,
         'message': f'Google Drive folders created for {folder_name}',
-        'bank_folder_id': drive_result.get('bank_folder_id'),
-        'statement_folder_id': drive_result.get('statement_folder_id'),  # ← use this for uploads now
-        # 'month_folders': drive_result.get('month_folders'),  # kept for future use, currently always []
+        'bank_account': BankAccountSerializer(bank_account).data,
         'drive_folders': {
             'total_folders': drive_result.get('total_folders_created', 0)
         }
@@ -120,6 +195,7 @@ def create_drive_folder(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_drive_folder_async(request):
     """
     Async version of folder creation.
@@ -136,7 +212,9 @@ def create_drive_folder_async(request):
         return Response({'error': f'Bank {bank_name} not found'}, status=404)
 
     folder_name = f"{bank_name} - {account_holder} - {account_number}"
-    task = create_drive_folder_task.delay(folder_name)
+    company_name = _get_company_name(request)
+
+    task = create_drive_folder_task.delay(folder_name, company_name=company_name)
     return Response(
         {
             'success': True,
@@ -149,6 +227,7 @@ def create_drive_folder_async(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def task_status(request, task_id):
     task_result = AsyncResult(task_id)
     payload = {
@@ -167,6 +246,7 @@ def task_status(request, task_id):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def upload_to_drive(request):
     """
@@ -241,6 +321,7 @@ def upload_to_drive(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def upload_to_drive_async(request):
     """
@@ -289,6 +370,7 @@ def upload_to_drive_async(request):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def register(request):
     serializer = RegisterSerializer(data=request.data)
     if not serializer.is_valid():
@@ -314,6 +396,7 @@ def register(request):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def login(request):
     serializer = LoginSerializer(data=request.data)
     if not serializer.is_valid():
@@ -339,6 +422,7 @@ def login(request):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def logout(request):
     try:
         refresh_token = request.data.get('refresh')
