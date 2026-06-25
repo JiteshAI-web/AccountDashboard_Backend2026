@@ -431,3 +431,79 @@ def logout(request):
         return Response({'success': True, 'message': 'Logged out'}, status=status.HTTP_200_OK)
     except Exception:
         return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def upload_receipt(request):
+    """Upload a receipt file to the company's Billing_Receipt Drive folder."""
+    try:
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response(
+                {'error': 'file is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        allowed_types = {
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/pdf': 'pdf',
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+        }
+
+        mime_type = uploaded_file.content_type
+        if mime_type not in allowed_types:
+            return Response(
+                {'error': f'Unsupported file type: {mime_type}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get company's Billing_Receipt folder
+        company_name = _get_company_name(request)
+        if not company_name:
+            return Response(
+                {'error': 'Could not determine company name'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get or create company folder to fetch Billing_Receipt folder ID
+        company_result = drive_service.get_or_create_company_folder(company_name)
+        if not company_result:
+            return Response(
+                {'error': 'Could not access company Drive folder'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        billing_receipt_folder_id = company_result['subfolders'].get('Billing_Receipt')
+        if not billing_receipt_folder_id:
+            return Response(
+                {'error': 'Billing_Receipt folder not found'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Upload file to Billing_Receipt folder
+        result = drive_service.upload_file(
+            file_obj=uploaded_file,
+            file_name=uploaded_file.name,
+            folder_id=billing_receipt_folder_id,
+            mime_type=mime_type
+        )
+
+        if not result:
+            return Response(
+                {'error': 'Failed to upload file to Google Drive'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response({
+            'success': True,
+            'message': f'Receipt uploaded to Billing_Receipt folder',
+            'file': result
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        print(f"❌ Error uploading receipt: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

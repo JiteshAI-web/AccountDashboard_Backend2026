@@ -119,35 +119,15 @@ class GoogleDriveService:
     ]
 
     def get_or_create_company_folder(self, company_name):
-        """
-        Get or create a company-level folder under the parent Drive folder,
-        along with 4 default subfolders.
-
-        Structure:
-            GOOGLE_DRIVE_PARENT_FOLDER_ID/
-              └── <company_name>/
-                  ├── Reconciliation_Receipt/
-                  ├── Ledger/
-                  ├── Bank_Statement/
-                  └── Billing_Receipt/
-
-        Args:
-            company_name: Name of the company
-
-        Returns:
-            dict with company folder ID and subfolder IDs, or None on failure
-        """
         if not self.service:
             return None
 
         try:
-            parent_folder_id = settings.GOOGLE_DRIVE_PARENT_FOLDER_ID
-
-            # Check if company folder already exists
-            company_folder_id = self.folder_exists(company_name, parent_folder_id)
+            # ← Create company folder in Drive ROOT, not inside parent folder
+            company_folder_id = self.folder_exists(company_name, parent_folder_id=None)
 
             if not company_folder_id:
-                company_folder_id = self.create_folder(company_name, parent_folder_id)
+                company_folder_id = self.create_folder(company_name, parent_folder_id=None)
                 print(f"🏢 Created company folder: {company_name}")
             else:
                 print(f"🏢 Company folder already exists: {company_name}")
